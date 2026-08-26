@@ -88,12 +88,12 @@ export default function ResultPage() {
   const dash = (circumference * Math.min(100, percentage)) / 100;
 
   return (
-    <div className="min-h-screen bg-slate-100">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3">
+    <div className="portal-shell">
+      <header className="portal-header">
+        <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3.5 sm:px-6">
           <div className="flex items-center gap-2">
-            <img src={logo} alt="ExamPlat" className="h-9 w-9 rounded-xl object-contain" />
-            <p className="text-sm font-bold text-slate-900">ExamPlat · Final Exam Result</p>
+            <img src={logo} alt="ExamPlat" className="brand-mark h-10 w-10" />
+            <div><p className="text-sm font-bold text-slate-900">ExamPlat</p><p className="text-xs text-slate-500">Final examination result</p></div>
           </div>
           <button className="btn-secondary" onClick={logout}>
             Log out
@@ -101,13 +101,16 @@ export default function ResultPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-2xl px-4 py-8">
-        <div className="card p-6 sm:p-8">
-          <p className="text-center text-xs font-medium uppercase tracking-widest text-slate-400">
+      <main className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
+        <div className="card overflow-hidden">
+          <div className="border-b border-slate-100 bg-slate-50/70 px-6 py-5 text-center sm:px-8">
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-indigo-600">
             {data.attempt?.testTitle || 'Final Exam'} · {data.attempt?.examCategory || 'Result'}
           </p>
+          <h1 className="mt-2 text-xl font-bold tracking-tight text-slate-900">Assessment summary</h1>
+          </div>
 
-          <div className="mt-6 flex flex-col items-center">
+          <div className="flex flex-col items-center px-6 pt-7 sm:px-8">
             <svg viewBox="0 0 120 120" className="h-36 w-36">
               <circle cx="60" cy="60" r={radius} fill="none" stroke="#e2e8f0" strokeWidth="10" />
               <circle
@@ -134,7 +137,7 @@ export default function ResultPage() {
             <p className="text-sm text-slate-500">marks obtained out of total questions</p>
           </div>
 
-          <div className="mt-6 grid grid-cols-3 gap-3">
+          <div className="mx-6 mt-7 grid grid-cols-3 gap-3 sm:mx-8">
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-center">
               <p className="text-2xl font-bold text-emerald-700">{r.correctAnswers}</p>
               <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-600">Correct</p>
@@ -149,7 +152,7 @@ export default function ResultPage() {
             </div>
           </div>
 
-          <dl className="mt-6 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+          <dl className="mx-6 mt-6 grid grid-cols-1 gap-3 text-sm sm:mx-8 sm:grid-cols-2">
             <div className="flex justify-between rounded-lg bg-slate-50 px-4 py-2.5">
               <dt className="text-slate-500">Time taken</dt>
               <dd className="font-semibold text-slate-800">{formatMinutes(r.timeTakenMinutes)}</dd>
@@ -171,19 +174,19 @@ export default function ResultPage() {
           </dl>
 
           {r.status === 'auto-submitted' && (
-            <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <div className="mx-6 mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:mx-8">
               <span className="font-semibold">Note:</span> The exam ran out of time and was auto-submitted
               {r.submissionReason ? ` (${r.submissionReason})` : ''}.
             </div>
           )}
 
           {autoLogoutSecs !== null && (
-            <div className="mt-5 rounded-lg border border-rose-300 bg-rose-100 px-4 py-3 text-sm font-medium text-rose-800">
+            <div className="mx-6 mt-5 rounded-xl border border-rose-300 bg-rose-100 px-4 py-3 text-sm font-medium text-rose-800 sm:mx-8">
               Your exam session is complete. You will be signed out automatically in <b>{autoLogoutSecs}s</b>.
             </div>
           )}
 
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <div className="mx-6 mt-7 flex flex-wrap justify-center gap-3 border-t border-slate-100 py-6 sm:mx-8">
             <button className="btn-secondary" onClick={() => navigate('/')}>
               Back to Dashboard
             </button>

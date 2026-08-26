@@ -48,20 +48,30 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-indigo-100 px-4 py-10">
-      <div className="w-full max-w-md">
-        <div className="mb-6 text-center">
-          <img src={logo} alt="ExamPlat" className="mx-auto mb-3 h-14 w-14 rounded-2xl object-contain shadow-lg shadow-indigo-200" />
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">ExamPlat</h1>
-          <p className="mt-1 text-sm text-slate-500">Final Exam Portal · Secure Entry</p>
-          <LiveISTClock className="mt-2 block text-xs font-semibold tabular-nums text-indigo-700" />
-        </div>
-
-        <div className="card p-6 sm:p-8">
-          <h2 className="text-lg font-semibold text-slate-900">Candidate Login</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Verify your identity using your Hall Ticket, the 4-digit Exam code and your Date of Birth.
-          </p>
+    <div className="portal-shell flex min-h-screen items-center justify-center px-4 py-8 sm:py-12">
+      <div className="grid w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_70px_-35px_rgba(15,23,42,0.4)] lg:grid-cols-[0.92fr_1.08fr]">
+        <section className="relative overflow-hidden bg-slate-950 px-7 py-9 text-white sm:px-10 lg:min-h-[650px] lg:py-12">
+          <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-indigo-500/30 blur-3xl" />
+          <div className="absolute -bottom-24 -left-16 h-64 w-64 rounded-full bg-sky-400/15 blur-3xl" />
+          <div className="relative flex h-full flex-col">
+            <div className="flex items-center gap-3">
+              <img src={logo} alt="ExamPlat" className="h-11 w-11 rounded-xl object-contain ring-1 ring-white/20" />
+              <div><p className="font-bold tracking-tight">ExamPlat</p><p className="text-xs text-slate-400">Secure assessment platform</p></div>
+            </div>
+            <div className="my-auto py-12">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-300">Candidate workspace</p>
+              <h1 className="mt-4 max-w-sm text-3xl font-bold leading-tight tracking-tight sm:text-4xl">A focused, secure way to take your final exam.</h1>
+              <p className="mt-5 max-w-sm text-sm leading-6 text-slate-300">Your identity, exam window and responses are verified and protected throughout the assessment.</p>
+              <div className="mt-8 space-y-3 text-sm text-slate-200"><p>✓ Server-synchronised exam timing</p><p>✓ Automatic answer saving</p><p>✓ Secure full-screen assessment</p></div>
+            </div>
+            <LiveISTClock className="text-xs font-semibold tabular-nums text-indigo-200" />
+          </div>
+        </section>
+        <section className="px-6 py-9 sm:px-10 sm:py-12">
+          <div className="mx-auto max-w-md">
+            <p className="eyebrow">Candidate sign in</p>
+            <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">Verify your identity</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-500">Enter the details exactly as provided in your exam registration.</p>
 
           <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4">
             <div>
@@ -132,15 +142,13 @@ export default function LoginPage() {
               </div>
             )}
 
-            <button type="submit" className="btn-primary w-full" disabled={loading}>
+            <button type="submit" className="btn-primary mt-2 w-full" disabled={loading}>
               {loading ? 'Verifying…' : 'Verify & Enter'}
             </button>
           </form>
-        </div>
-
-        <p className="mt-5 text-center text-xs text-slate-400">
-          All three details are verified together before any exam content is shown.
-        </p>
+            <p className="mt-7 border-t border-slate-100 pt-5 text-center text-xs leading-5 text-slate-400">All three details are verified together before any exam content is shown.</p>
+          </div>
+        </section>
       </div>
     </div>
   );

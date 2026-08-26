@@ -4,7 +4,7 @@ const FinalAllowedCandidate = require('../models/FinalAllowedCandidate');
 const Student = require('../models/Student');
 const ExamRegistration = require('../models/ExamRegistration');
 const mongoose = require('mongoose');
-const { normalizeHallTicket, escapeRegExp, DOB_ALIASES } = require('../utils/helpers');
+const { normalizeHallTicket, escapeRegExp, DOB_ALIASES, toExamCategory } = require('../utils/helpers');
 
 /** Accepts duration as minutes (number) or an admin-style object {hours, minutes}. */
 function parseDurationMinutes(raw) {
@@ -118,6 +118,28 @@ async function getStudentDobByHallTicket(hallTicket) {
   }
 
   return null;
+}
+
+/**
+ * Resolve the FINAL exam category (JEE | NEET) that the candidate actually
+ * registered for, from the legacy `examregistrations` collection (READ-ONLY).
+ * The candidate is matched by any of the hall-ticket-ish fields; the returned
+ * value is '' when no registration (or an unrecognised examType) is found so
+ * that callers may be lenient rather than lock out unknown candidates.
+ */
+async function getRegisteredExamCategoryByHallTicket(hallTicket) {
+  const regex = new RegExp(`^${escapeRegExp(hallTicket)}$`, 'i');
+  const registration = await ExamRegistration.findOne({
+    $or: [
+      { registrationNumber: regex },
+      { hallTicketNo: regex },
+      { hallTicket: regex },
+      { registrationId: regex },
+    ],
+  }).lean();
+  if (!registration) return '';
+  const raw = registration.examType ?? registration.exam ?? registration.examCategory;
+  return toExamCategory(raw);
 }
 
 async function loadQuestionsForExam(examId) {
@@ -260,6 +282,7 @@ module.exports = {
   getExamDurationMinutes,
   findCandidateForExam,
   getStudentDobByHallTicket,
+  getRegisteredExamCategoryByHallTicket,
   computeResult,
   submitAttempt,
   maybeAutoSubmit,

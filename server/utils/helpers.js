@@ -53,6 +53,18 @@ function lastFourOfExamId(examId) {
 /** Common keys used by the legacy `students` collection for DOB. */
 const DOB_ALIASES = ['dob', 'dateOfBirth', 'DOB', 'DateOfBirth', 'birthDate', 'birth_date', 'birthdate', 'dob_of_birth', 'date_of_birth'];
 
+/**
+ * Map a legacy registration's exam-type string to the canonical FINAL exam
+ * category used by `finalexams.examCategory` (JEE | NEET). Returns '' when the
+ * value cannot be recognised so callers can choose to be lenient.
+ */
+function toExamCategory(examType) {
+  const s = String(examType || '').toUpperCase();
+  if (s.includes('NEET')) return 'NEET';
+  if (s.includes('JEE')) return 'JEE';
+  return '';
+}
+
 /** A safe, client-friendly view of a finalexams document. */
 function publicExamView(exam) {
   return {
@@ -90,5 +102,6 @@ module.exports = {
   compareDob,
   lastFourOfExamId,
   DOB_ALIASES,
+  toExamCategory,
   publicExamView,
 };

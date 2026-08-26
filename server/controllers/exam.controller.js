@@ -16,6 +16,7 @@ const {
   getEffectiveSettings,
   findCandidateForExam,
   getStudentDobByHallTicket,
+  getRegisteredExamCategoryByHallTicket,
   submitAttempt,
   maybeAutoSubmit,
   getLatestAttempt,
@@ -28,6 +29,9 @@ const {
  *   1. Hall ticket is allow-listed for this final exam
  *   2. Entered 4 digits equal the tail of that exam's finalExamId
  *   3. DOB matches (allow-list dob, falling back to legacy `students` dob)
+ * Plus a category gate: the hall ticket's registered exam category (JEE/NEET)
+ * must match the exam's examCategory, so a JEE hall ticket cannot enter a NEET
+ * final (and vice-versa).
  * Success => signed JWT { candidateId, examId } + exam metadata + candidate info.
  */
 exports.login = async (req, res, next) => {
@@ -80,6 +84,19 @@ exports.login = async (req, res, next) => {
     const dobSource = candidate.dob || (await getStudentDobByHallTicket(hall));
     if (!compareDob(dobSource, dob)) {
       return res.status(403).json({ success: false, error: 'dob', message: 'DOB does not match the registration records.' });
+    }
+
+    // 5) 3rd-factor #4 - the hall ticket must belong to a candidate who actually
+    // registered for THIS exam's category. e.g. a JEE hall ticket must not gain
+    // entry to a NEET final (and vice-versa) even if allow-listed by mistake.
+    const examCategory = exam.examCategory || '';
+    const registeredCategory = await getRegisteredExamCategoryByHallTicket(hall);
+    if (registeredCategory && examCategory && registeredCategory !== examCategory) {
+      return res.status(403).json({
+        success: false,
+        error: 'hallTicket',
+        message: `You did not register for this ${examCategory} exam.`,
+      });
     }
 
     // Intentional submission and timer expiry permanently end access. Other
@@ -277,6 +294,7 @@ exports.getQuestions = async (req, res, next) => {
       options: q.options,
       subject: q.subject || '',
       topic: q.topic || '',
+      image: q.image || '',
       // This is the candidate's own saved response; correctOption is never sent.
       selectedOption: savedAnswers.has(String(q._id)) ? savedAnswers.get(String(q._id)) : null,
     }));

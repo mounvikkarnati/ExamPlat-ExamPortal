@@ -19,6 +19,7 @@ const finalQuestionSchema = new mongoose.Schema(
     correctOption: { type: Number, required: true, min: 0, max: 3 },
     subject: { type: String, default: '' },
     topic: { type: String, default: '' },
+    image: { type: String, default: '' },
   },
   { collection: 'finalquestions', strict: false, timestamps: true, autoIndex: false }
 );

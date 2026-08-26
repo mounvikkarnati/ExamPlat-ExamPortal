@@ -158,6 +158,14 @@ Any mismatch returns a **field-specific error**, shown under the offending input
 `"Hall ticket not allowed for this exam"`, `"Incorrect test ID ..."`,
 `"DOB does not match the registration records."`.
 
+After the three factors pass, a **category gate** is enforced: the hall ticket's
+legacy registration (`examregistrations.examType`, e.g. `JEE Main` vs `NEET`) must
+match the exam's `examCategory`. A JEE hall ticket (e.g. `EX202600001`) cannot enter a
+NEET exam even if a final-exam admin allow-listed it by mistake — the login is
+rejected with `"You did not register for this NEET exam. This hall ticket (…) is
+registered for JEE only."` The same applies in reverse for NEET tickets on JEE exams.
+If the registration cannot be resolved, the gate is lenient (no lockout).
+
 On success the API issues a signed JWT `{ candidateId, examId }` (expires per
 `JWT_EXPIRES_IN`, default 8h) plus exam metadata + candidate info.
 

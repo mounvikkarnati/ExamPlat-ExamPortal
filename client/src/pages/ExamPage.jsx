@@ -19,6 +19,13 @@ const PALETTE_CLASSES = {
 
 const MP_LIMIT = 3; // warnings allowed; the 4th offence disqualifies
 
+// Cursor guard: the red line between the navbar and the question area is the
+// boundary. The instant the pointer reaches/touches the red line (going up), the
+// cursor is hidden ("returned to centre"); it only becomes visible again once the
+// pointer comes back well into the question area. Browsers cannot physically move
+// the OS cursor, so this hides it + shows the centre popup instead.
+const GUARD_RELEASE_MARGIN_PX = 120; // px below the red line the pointer must return to
+
 export default function ExamPage() {
   const navigate = useNavigate();
   const { exam, candidate, logout } = useAuth();
@@ -35,6 +42,8 @@ export default function ExamPage() {
   const [marked, setMarked] = useState({});
   const [visited, setVisited] = useState({});
   const [leftSeconds, setLeftSeconds] = useState(null);
+  const [fontScale, setFontScale] = useState(1); // A=1 · A+=1.5 · A++=2
+  const [guardHit, setGuardHit] = useState(false); // cursor bounced off the top edge
 
   const [mpCount, setMpCount] = useState(0);
   const [lastViolation, setLastViolation] = useState('');
@@ -53,6 +62,9 @@ export default function ExamPage() {
   const endAtRef = useRef(null);
   const activeRef = useRef(false);
   const lastStrikeRef = useRef(0);
+  const lastYRef = useRef(-1); // last known pointer y, used by the cursor guard
+  const guardActiveRef = useRef(false); // guard already engaged (avoids flicker)
+  const redLineRef = useRef(null); // red boundary line element (guard boundary)
 
   const total = questions.length;
   const q = questions[current];
@@ -371,6 +383,96 @@ export default function ExamPage() {
     return () => window.clearInterval(timer);
   }, [phase, handleSubmit]);
 
+  // ---- text size controls (A / A+ / A++) ------------------------------------
+  // Scales the root font size so every rem-based Tailwind text on this screen
+  // grows proportionally. Layout caps and image sizes below are px-based, so
+  // question images are deliberately NOT enlarged. Original size restored on
+  // unmount.
+  const prevFontSizeRef = useRef(null);
+  useEffect(() => {
+    if (prevFontSizeRef.current === null) {
+      prevFontSizeRef.current = document.documentElement.style.fontSize;
+    }
+    document.documentElement.style.fontSize = `${fontScale * 100}%`;
+    return () => {
+      document.documentElement.style.fontSize = prevFontSizeRef.current;
+      prevFontSizeRef.current = null;
+    };
+  }, [fontScale]);
+
+  // ---- cursor guard: keep the pointer away from (above) the red line -----------
+  // The red line is the hard boundary. The moment the pointer reaches it (even 1px
+  // of touch / crossing it), engage the guard: hide the cursor so it can't be
+  // aimed at the OS/browser controls, and show the "returned to centre" notice.
+  // The guard stays engaged until the pointer comes back well below the red line.
+  const enterGuardZone = useCallback(() => {
+    if (phase !== 'active' || fsExited || dq || submittedRef.current) return;
+    if (guardActiveRef.current) return; // already engaged — no flicker
+    guardActiveRef.current = true;
+    document.documentElement.classList.add('cursor-none');
+    setGuardHit(true);
+  }, [phase, fsExited, dq]);
+
+  const releaseGuard = useCallback(() => {
+    guardActiveRef.current = false;
+    document.documentElement.classList.remove('cursor-none');
+    setGuardHit(false);
+  }, []);
+
+  // Exact screen Y of the red line (top edge = the boundary). Read live from the
+  // DOM on every event so scrolling / resizing never throws it off.
+  const redLineTopY = () => {
+    const el = redLineRef.current;
+    if (!el) return 64; // fallback before the line renders
+    return el.getBoundingClientRect().top;
+  };
+
+  // Watch the pointer continuously while the exam is active. Trigger the guard the
+  // instant the cursor is at/above the red line (crossing upward), even 1px of
+  // touch. mouseout with no relatedTarget means the pointer left the page/window
+  // entirely (toward OS/browser chrome) — treat that as crossing too.
+  useEffect(() => {
+    if (phase !== 'active' || fsExited) return undefined;
+    const onMove = (e) => {
+      lastYRef.current = e.clientY;
+      if (e.clientY <= redLineTopY()) enterGuardZone();
+    };
+    const onOut = (e) => {
+      if (e.relatedTarget === null) enterGuardZone();
+    };
+    window.addEventListener('mousemove', onMove, { passive: true });
+    document.documentElement.addEventListener('mouseout', onOut);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      document.documentElement.removeEventListener('mouseout', onOut);
+    };
+  }, [phase, fsExited, enterGuardZone]);
+
+  // While guarded, the cursor stays hidden until the pointer returns well below the
+  // red line (into the question area). A safety timer prevents a stuck hidden
+  // cursor on edge cases (e.g. the pointer is already back but no event fired).
+  useEffect(() => {
+    if (!guardHit) return undefined;
+    const onMove = (e) => {
+      lastYRef.current = e.clientY;
+      if (e.clientY >= redLineTopY() + GUARD_RELEASE_MARGIN_PX) releaseGuard();
+    };
+    window.addEventListener('mousemove', onMove, { passive: true });
+    const safety = window.setTimeout(() => {
+      if (lastYRef.current >= redLineTopY() + GUARD_RELEASE_MARGIN_PX) releaseGuard();
+    }, 6000);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.clearTimeout(safety);
+    };
+  }, [guardHit, releaseGuard]);
+
+  // Always release the guard when the exam leaves the active/fullscreen state.
+  useEffect(() => {
+    if (phase !== 'active' || fsExited || dq) releaseGuard();
+    return () => releaseGuard();
+  }, [phase, fsExited, dq, releaseGuard]);
+
   // Dispose per-question debounce timers on unmount.
   useEffect(() => {
     const timers = timersRef.current;
@@ -523,7 +625,7 @@ export default function ExamPage() {
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-indigo-100 px-4 py-10">
         <div className="w-full max-w-2xl">
           <div className="mb-5 flex items-center gap-3">
-            <img src={logo} alt="ExamPlat" className="h-11 w-11 rounded-xl object-contain shadow-lg shadow-indigo-200" />
+            <img src={logo} alt="ExamPlat" className="h-[44px] w-[44px] rounded-xl object-contain shadow-lg shadow-indigo-200" />
             <div>
               <h1 className="text-xl font-bold tracking-tight text-slate-900">{exam?.title || 'Final Exam'}</h1>
               <p className="text-xs text-slate-400">
@@ -539,19 +641,19 @@ export default function ExamPage() {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-center">
                 <p className="text-lg font-bold text-slate-900">{pre?.questionCount ?? '—'}</p>
-                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Questions</p>
+                <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-slate-400">Questions</p>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-center">
                 <p className="text-lg font-bold text-slate-900">{pre?.durationMinutes ? `${pre.durationMinutes}m` : '—'}</p>
-                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Duration</p>
+                <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-slate-400">Duration</p>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-center">
                 <p className="text-lg font-bold text-emerald-600">+1</p>
-                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Correct</p>
+                <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-slate-400">Correct</p>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-center">
                 <p className="text-lg font-bold text-slate-500">0</p>
-                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Wrong / Blank</p>
+                <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-slate-400">Wrong / Blank</p>
               </div>
             </div>
 
@@ -594,19 +696,36 @@ export default function ExamPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-100">
+      {/* cursor-guard feedback: the pointer touched/crossed the red line, so the cursor
+          was hidden and "returned to the centre" until the mouse comes back down */}
+      {guardHit && !dq && (
+        <div className="pointer-events-none fixed inset-0 z-[75] flex items-center justify-center px-4">
+          <div className="flex max-w-md items-start gap-3 rounded-2xl border border-rose-200 bg-white px-5 py-4 shadow-2xl">
+            <span className="text-2xl leading-none">⚠️</span>
+            <div>
+              <p className="text-sm font-bold leading-5 text-rose-600">Cursor returned to the centre</p>
+              <p className="mt-0.5 text-xs leading-5 text-slate-500">
+                You touched the red boundary line. The cursor stays hidden until you move it back
+                into the question area — it cannot reach the top of the screen while the test runs.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ===== top bar ===== */}
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between gap-3 px-4 py-2.5">
           <div className="flex min-w-0 items-center gap-3">
-            <img src={logo} alt="ExamPlat" className="h-9 w-9 shrink-0 rounded-lg object-contain" />
+            <img src={logo} alt="ExamPlat" className="h-[36px] w-[36px] shrink-0 rounded-lg object-contain" />
             <div className="min-w-0">
               <p className="truncate text-sm font-bold text-slate-900">{exam?.title || 'Final Exam'}</p>
-              <p className="truncate text-[11px] text-slate-400">
+              <p className="truncate text-[0.6875rem] text-slate-400">
                 {exam?.finalExamId}
                 {exam?.subject ? ` · ${exam.subject}` : ''}
                 {exam?.examCategory ? ` · ${exam.examCategory}` : ''}
               </p>
-              <LiveISTClock className="hidden text-[10px] font-semibold tabular-nums text-indigo-600 sm:block" />
+              <LiveISTClock className="hidden text-[0.625rem] font-semibold tabular-nums text-indigo-600 sm:block" />
             </div>
           </div>
           {lastViolation && (
@@ -638,17 +757,18 @@ export default function ExamPage() {
               <p className={cn('font-mono text-xl font-bold leading-6 tabular-nums', timerLow ? 'animate-pulse text-rose-600' : 'text-slate-800')}>
                 {formatClock(leftSeconds)}
               </p>
-              <p className={cn('text-[10px] font-medium uppercase tracking-wider', timerLow ? 'text-rose-500' : 'text-slate-400')}>
+              <p className={cn('text-[0.625rem] font-medium uppercase tracking-wider', timerLow ? 'text-rose-500' : 'text-slate-400')}>
                 time left
               </p>
             </div>
           </div>
         </div>
-        {timerLow && <div className="h-0.5 w-full animate-pulse bg-rose-500" />}
+        {/* red boundary line between the navbar and the question area; pulses when time is low */}
+        <div ref={redLineRef} className={cn('h-[3px] w-full bg-rose-500', timerLow && 'animate-pulse')} aria-hidden="true" />
       </header>
 
       {/* ===== workspace ===== */}
-      <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 px-4 py-4 lg:flex-row">
+      <div className="mx-auto flex w-full max-w-[1280px] flex-1 flex-col gap-4 px-4 py-4 lg:flex-row">
         <main className="min-w-0 flex-1">
           {submitError && (
             <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -669,7 +789,18 @@ export default function ExamPage() {
               </div>
 
               <div className="border-b border-slate-100 bg-slate-50/60 px-5 py-6 sm:px-7">
-                <p className="whitespace-pre-line text-[15px] leading-7 text-slate-800">{q.questionText}</p>
+                <p className="whitespace-pre-line text-[0.9375rem] leading-7 text-slate-800">{q.questionText}</p>
+
+                {q.image ? (
+                  <div className="mt-4">
+                    <img
+                      src={q.image}
+                      alt="Question diagram"
+                      className="w-3/4 rounded-lg border border-slate-200 object-contain"
+                      loading="lazy"
+                    />
+                  </div>
+                ) : null}
               </div>
 
               <div className="space-y-2.5 px-5 py-5 sm:px-7">
@@ -747,9 +878,39 @@ export default function ExamPage() {
         </main>
 
         {/* ---- question palette ---- */}
-        <aside className="w-full shrink-0 lg:w-72">
+        <aside className="w-full shrink-0 lg:w-[288px]">
           <div className="card sticky top-[76px] p-4">
-            <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Question Palette</h2>
+            {/* text size controls: A = default · A+ = 1.5× · A++ = 2× */}
+            <div
+              className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1.5"
+              title="Text size"
+            >
+              <span className="pl-1 text-[11px] font-medium uppercase tracking-wide text-slate-400">Text size</span>
+              <div className="flex items-center gap-0.5">
+                {[
+                  { label: 'A', value: 1, tip: 'Default text size' },
+                  { label: 'A+', value: 1.5, tip: 'Increase text size 1.5×' },
+                  { label: 'A++', value: 2, tip: 'Increase text size 2×' },
+                ].map((opt) => (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    title={opt.tip}
+                    onClick={() => setFontScale(opt.value)}
+                    className={cn(
+                      'rounded-md px-2 py-1 text-xs font-bold leading-none transition',
+                      fontScale === opt.value
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-slate-500 hover:bg-white hover:text-slate-800'
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <h2 className="mt-3 text-sm font-bold uppercase tracking-wide text-slate-500">Question Palette</h2>
 
             <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-slate-600">
               <div className="flex items-center gap-1.5">
@@ -786,7 +947,7 @@ export default function ExamPage() {
                 >
                   {i + 1}
                   {answers[qq.id] !== undefined && !!marked[qq.id] && (
-                    <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-600 text-[9px] leading-none text-white">
+                    <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-600 text-[0.5625rem] leading-none text-white">
                       ✓
                     </span>
                   )}
@@ -794,7 +955,7 @@ export default function ExamPage() {
               ))}
             </div>
 
-            <div className="mt-4 space-y-1.5 border-t border-slate-100 pt-3 text-[11px] text-slate-500">
+            <div className="mt-4 space-y-1.5 border-t border-slate-100 pt-3 text-[0.6875rem] text-slate-500">
               <p><span className="mr-1.5 inline-block h-2 w-2 rounded-sm bg-emerald-500" />Answered</p>
               <p><span className="mr-1.5 inline-block h-2 w-2 rounded-sm bg-rose-500" />Not answered (visited)</p>
               <p><span className="mr-1.5 inline-block h-2 w-2 rounded-sm bg-violet-300" />Marked for review</p>
@@ -837,7 +998,7 @@ export default function ExamPage() {
           >
             Return to full screen &amp; resume exam
           </button>
-          <p className="text-[11px] text-slate-500">The exam clock keeps running while you are away.</p>
+          <p className="text-[0.6875rem] text-slate-500">The exam clock keeps running while you are away.</p>
         </div>
       )}
 
@@ -866,15 +1027,15 @@ export default function ExamPage() {
             <div className="mt-4 grid grid-cols-3 gap-2 text-center text-sm">
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-2 py-2.5">
                 <p className="text-xl font-bold text-emerald-700">{answeredCount}</p>
-                <p className="text-[11px] font-medium text-emerald-600">Answered</p>
+                <p className="text-[0.6875rem] font-medium text-emerald-600">Answered</p>
               </div>
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-2 py-2.5">
                 <p className="text-xl font-bold text-rose-700">{counts.notAnswered + counts.markedOnly}</p>
-                <p className="text-[11px] font-medium text-rose-600">Unanswered</p>
+                <p className="text-[0.6875rem] font-medium text-rose-600">Unanswered</p>
               </div>
               <div className="rounded-xl border border-violet-200 bg-violet-50 px-2 py-2.5">
                 <p className="text-xl font-bold text-violet-700">{counts.answeredMarked + counts.markedOnly}</p>
-                <p className="text-[11px] font-medium text-violet-600">Marked</p>
+                <p className="text-[0.6875rem] font-medium text-violet-600">Marked</p>
               </div>
             </div>
 
