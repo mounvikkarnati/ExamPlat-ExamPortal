@@ -48,11 +48,13 @@ app.use(notFound);
 app.use(errorHandler);
 
 async function start() {
-  // Fails safely: server still boots so the frontend/health route work while the
-  // real MONGO_URI is being configured.
+  // The exam API is DB-strict by design: candidates must not be able to sit an
+  // exam unless MongoDB is reachable. connectDB() returns false (nothing throws)
+  // if the DB is unavailable, so a failed DB connection does not crash the boot.
   await connectDB();
-  const server = app.listen(PORT, () => {
-    console.log(`[ExamPlat] Final Exam Portal API listening on http://localhost:${PORT}`);
+  // Bind to 0.0.0.0 so Render's external proxy can route traffic to this process.
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[ExamPlat] Final Exam Portal API listening on port ${PORT}`);
     console.log(`[ExamPlat] CORS allowed origin(s): ${allowedOrigins.join(', ') || '(all non-browser)'}`);
   });
   server.on('error', (err) => {
