@@ -54,6 +54,7 @@ export default function ExamPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [pre, setPre] = useState(null); // details captured before the exam starts
+  const [prep, setPrep] = useState(90); // seconds before questions unlock (lets question images preload)
 
   const answersRef = useRef({});
   const dirtyRef = useRef(new Set());
@@ -208,7 +209,9 @@ export default function ExamPage() {
       setSubmitError('');
       try {
         await flushAll();
-        await api.post('/exam/submit', reason ? { reason } : {});
+        const submitPayload = { browser: navigator.userAgent || '' };
+        if (reason) submitPayload.reason = reason;
+        await api.post('/exam/submit', submitPayload);
         if (reason === 'time expired') {
           showTimeOver();
         } else if (reason) {
@@ -318,6 +321,7 @@ export default function ExamPage() {
       api.post('/exam/progress', { questionId: list[initialIndex].id }).catch(() => {});
 
       activeRef.current = true;
+      setPrep(90); // kick off the pre-question image-load countdown
       setPhase('active');
     } catch (err) {
       activeRef.current = false;
@@ -382,6 +386,16 @@ export default function ExamPage() {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [phase, handleSubmit]);
+
+  // ---- pre-question image-loading countdown ------------------------------------
+  // Runs on the active exam page. Questions (and their images) are already mounted
+  // underneath the overlay, so the browser has 90s to fully load every image before
+  // the candidate can start answering.
+  useEffect(() => {
+    if (phase !== 'active' || prep <= 0) return undefined;
+    const timer = window.setInterval(() => setPrep((p) => Math.max(0, p - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [phase, prep]);
 
   // ---- text size controls (A / A+ / A++) ------------------------------------
   // Scales the root font size so every rem-based Tailwind text on this screen
@@ -692,6 +706,7 @@ export default function ExamPage() {
 
   // ===== ACTIVE EXAM =====
   const timerLow = leftSeconds !== null && leftSeconds <= 300;
+  const prepActive = prep > 0; // pre-question countdown still running -> questions locked
   const answeredCount = counts.answered + counts.answeredMarked;
 
   return (
@@ -768,7 +783,28 @@ export default function ExamPage() {
       </header>
 
       {/* ===== workspace ===== */}
-      <div className="mx-auto flex w-full max-w-[1280px] flex-1 flex-col gap-4 px-4 py-4 lg:flex-row">
+      <div className="relative mx-auto flex w-full max-w-[1280px] flex-1 flex-col gap-4 px-4 py-4 lg:flex-row">
+        {/* pre-question image-loading countdown overlay (covers workspace, keeps the header clock visible) */}
+        {prepActive && (
+          <div className="absolute inset-0 z-40 flex items-center justify-center rounded-2xl bg-white/90 px-4 backdrop-blur-sm">
+            <div className="card w-full max-w-md border-indigo-100 p-8 text-center shadow-2xl">
+              <div className="text-5xl">🖼️</div>
+              <h2 className="mt-3 text-lg font-bold text-slate-900">Get ready — Questions loading</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                We are pre-loading every question image so nothing is delayed once you start. You can begin answering in…
+              </p>
+              <div className="mt-5 font-mono text-6xl font-black tabular-nums text-indigo-600">{prep}</div>
+              <div className="mt-1 text-xs font-medium uppercase tracking-wider text-slate-400">seconds</div>
+              <div className="mt-5 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-indigo-500 transition-all duration-1000"
+                  style={{ width: `${((90 - prep) / 90) * 100}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         <main className="min-w-0 flex-1">
           {submitError && (
             <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -811,7 +847,7 @@ export default function ExamPage() {
                       key={oi}
                       type="button"
                       onClick={() => selectOption(q.id, oi)}
-                      disabled={submitting}
+                      disabled={submitting || prepActive}
                       className={cn(
                         'flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition',
                         selected
@@ -836,13 +872,13 @@ export default function ExamPage() {
 
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3.5">
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" className="btn-secondary" onClick={() => goto(current - 1)} disabled={current === 0 || submitting}>
+                  <button type="button" className="btn-secondary" onClick={() => goto(current - 1)} disabled={current === 0 || submitting || prepActive}>
                     ← Previous
                   </button>
                   <button
                     type="button"
                     onClick={clearCurrent}
-                    disabled={submitting || answers[q.id] === undefined}
+                    disabled={submitting || prepActive || answers[q.id] === undefined}
                     className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Clear Response
@@ -852,7 +888,7 @@ export default function ExamPage() {
                   <button
                     type="button"
                     onClick={markForReviewAndNext}
-                    disabled={submitting}
+                    disabled={submitting || prepActive}
                     className="inline-flex items-center justify-center rounded-lg border border-amber-400 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-700 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Mark for Review &amp; Next
@@ -860,7 +896,7 @@ export default function ExamPage() {
                   <button
                     type="button"
                     onClick={saveAndNext}
-                    disabled={submitting}
+                    disabled={submitting || prepActive}
                     className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {current === total - 1 ? 'Save Response' : 'Save & Next'} →
@@ -937,7 +973,7 @@ export default function ExamPage() {
                   key={qq.id}
                   type="button"
                   onClick={() => goto(i)}
-                  disabled={submitting}
+                  disabled={submitting || prepActive}
                   title={`Question ${i + 1}`}
                   className={cn(
                     'relative h-9 rounded-md border text-sm font-bold transition focus:outline-none focus:ring-2 focus:ring-indigo-400',
@@ -965,7 +1001,7 @@ export default function ExamPage() {
             <button
               type="button"
               onClick={() => setShowConfirm(true)}
-              disabled={submitting}
+              disabled={submitting || prepActive}
               className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Submit Exam

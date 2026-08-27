@@ -407,6 +407,10 @@ exports.submitExam = async (req, res, next) => {
 
     // Optional system reason. A normal browser submit deliberately sends none.
     const reasonInput = typeof req.body?.reason === 'string' ? req.body.reason.trim().toLowerCase() : '';
+    // Browser the candidate used (raw navigator.userAgent from the client).
+    const browser = typeof req.body?.browser === 'string' ? req.body.browser.trim() : '';
+    const attemptOptions = { candidate, exam, now };
+    if (browser) attemptOptions.browser = browser;
 
     if (candidate.status === 'submitted' || candidate.status === 'auto-submitted') {
       const attempt = await getLatestAttempt(candidate._id);
@@ -429,7 +433,7 @@ exports.submitExam = async (req, res, next) => {
 
     // Disqualification path - bypass window/attempt guards, force auto-submit.
     if (reasonInput === 'malpractice' || reasonInput === 'time expired') {
-      const outcome = await submitAttempt({ candidate, exam, reason: reasonInput, now });
+      const outcome = await submitAttempt({ ...attemptOptions, reason: reasonInput });
       return res.json({
         success: true,
         disqualified: true,
@@ -447,7 +451,7 @@ exports.submitExam = async (req, res, next) => {
 
     // Window already closed during the attempt -> force auto-submit.
     if (now > eff.endAt) {
-      const outcome = await maybeAutoSubmit(candidate, exam, now);
+      const outcome = await maybeAutoSubmit(candidate, exam, now, browser);
       return res.json({
         success: true,
         autoSubmitted: true,
@@ -460,7 +464,7 @@ exports.submitExam = async (req, res, next) => {
       return res.status(403).json({ success: false, error: 'attempts', message: 'No attempts left for this exam.' });
     }
 
-    const outcome = await submitAttempt({ candidate, exam, reason: '', now });
+    const outcome = await submitAttempt({ ...attemptOptions, reason: '' });
     return res.json({
       success: true,
       attempt: attemptToJson(outcome.attempt),

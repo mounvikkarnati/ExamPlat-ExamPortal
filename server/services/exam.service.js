@@ -188,7 +188,7 @@ async function computeResult(candidate, exam) {
  *  - insert ONE row into finalattempts
  *  - `testMongoId` is set to the STRING form of the exam _id
  */
-async function submitAttempt({ candidate, exam, reason = '', now = new Date() }) {
+async function submitAttempt({ candidate, exam, reason = '', now = new Date(), browser = '' }) {
   const result = await computeResult(candidate, exam);
   const systemInitiated = reason === 'time expired' || reason === 'malpractice';
   const effective = getEffectiveSettings(exam, candidate);
@@ -227,6 +227,7 @@ async function submitAttempt({ candidate, exam, reason = '', now = new Date() })
     testTitle: exam.title,
     examCategory: exam.examCategory,
     submittedAt,
+    browser: String(browser || '').slice(0, 500),
   });
 
   await Promise.all([candidate.save(), attempt.save()]);
@@ -237,7 +238,7 @@ async function submitAttempt({ candidate, exam, reason = '', now = new Date() })
  * Auto-submit when the effective end time has passed and the candidate had an
  * active session on this exam. No-op otherwise.
  */
-async function maybeAutoSubmit(candidate, exam, now = new Date()) {
+async function maybeAutoSubmit(candidate, exam, now = new Date(), browser = '') {
   const eff = getEffectiveSettings(exam, candidate);
   if (now <= eff.endAt) return { submitted: false };
   if (['submitted', 'auto-submitted'].includes(candidate.status)) return { submitted: false, alreadySubmitted: true };
@@ -245,7 +246,7 @@ async function maybeAutoSubmit(candidate, exam, now = new Date()) {
   const hasActiveSession = !!candidate.sessionStartedAt || (candidate.responses || []).length > 0;
   if (!hasActiveSession) return { submitted: false, notStarted: true };
 
-  const outcome = await submitAttempt({ candidate, exam, reason: 'time expired', now });
+  const outcome = await submitAttempt({ candidate, exam, reason: 'time expired', now, browser });
   return { submitted: true, ...outcome };
 }
 

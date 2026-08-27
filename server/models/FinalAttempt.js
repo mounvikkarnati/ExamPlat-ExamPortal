@@ -24,6 +24,10 @@ const finalAttemptSchema = new mongoose.Schema(
     testTitle: { type: String, default: '' },
     examCategory: { type: String, default: '' },
     submittedAt: { type: Date, default: null },
+    // Browser this attempt was taken in. Raw navigator.userAgent sent by the
+    // client (e.g. "... ExamPlat-Browser/1.0 Chrome/126 ...", or a normal
+    // browser's UA). The Admin Portal reads this to show the browser type.
+    browser: { type: String, default: '', trim: true },
   },
   { collection: 'finalattempts', strict: false, timestamps: true, autoIndex: false }
 );
