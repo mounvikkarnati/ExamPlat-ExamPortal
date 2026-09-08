@@ -129,6 +129,7 @@ exports.login = async (req, res, next) => {
       candidate: {
         id: String(candidate._id),
         hallTicketNo: candidate.hallTicketNo,
+        email: candidate.email || candidate.resultEmail || '',
         dob: candidate.dob || null,
         status: candidate.status,
         attemptsUsed: candidate.attemptsUsed || 0,

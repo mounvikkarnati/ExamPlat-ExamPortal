@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import { formatDateTime, formatMinutes } from '../utils/format';
+import { cn, formatDateTime, formatMinutes } from '../utils/format';
 import logo from '../logo.png';
 
 export default function ResultPage() {
@@ -14,6 +14,13 @@ export default function ResultPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [autoLogoutSecs, setAutoLogoutSecs] = useState(null);
+
+  // Exam feedback - 100% client-side: the rating and feedback are never sent
+  // anywhere or stored; they disappear when the tab/session closes.
+  const [rating, setRating] = useState(0);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [feedback, setFeedback] = useState('');
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,11 +40,12 @@ export default function ResultPage() {
   }, []);
 
   // A score page is shown only for an intentional submit and ends the session
-  // after a short review period.
+  // after a short review period. The countdown only starts once the (optional,
+  // un-stored) exam feedback has been submitted so there is time to rate it.
   useEffect(() => {
-    if (!data?.available) return undefined;
+    if (!data?.available || !feedbackSubmitted) return undefined;
 
-    setAutoLogoutSecs(8);
+    setAutoLogoutSecs(12);
     const iv = window.setInterval(() => {
       setAutoLogoutSecs((s) => {
         if (s <= 1) {
@@ -50,7 +58,7 @@ export default function ResultPage() {
       });
     }, 1000);
     return () => window.clearInterval(iv);
-  }, [data, logout, navigate]);
+  }, [data, feedbackSubmitted, logout, navigate]);
 
   if (loading) {
     return (
@@ -183,6 +191,54 @@ export default function ResultPage() {
           {autoLogoutSecs !== null && (
             <div className="mx-6 mt-5 rounded-xl border border-rose-300 bg-rose-100 px-4 py-3 text-sm font-medium text-rose-800 sm:mx-8">
               Your exam session is complete. You will be signed out automatically in <b>{autoLogoutSecs}s</b>.
+            </div>
+          )}
+
+          {!feedbackSubmitted ? (
+            <div className="mx-6 mt-6 rounded-xl border border-slate-200 bg-white px-5 py-4 sm:mx-8">
+              <p className="text-sm font-bold text-slate-900">Rate your experience</p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Optional — this stays in your browser and is <b>not recorded or stored</b> anywhere.
+              </p>
+
+              <div className="mt-3 flex items-center gap-2">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setRating(n)}
+                    onMouseEnter={() => setHoverRating(n)}
+                    onMouseLeave={() => setHoverRating(0)}
+                    className="p-1 text-3xl leading-none transition hover:scale-110"
+                    title={`${n} star${n === 1 ? '' : 's'}`}
+                  >
+                    <span className={cn(n <= (hoverRating || rating) ? 'text-amber-400 drop-shadow' : 'text-slate-300')}>★</span>
+                  </button>
+                ))}
+                <span className="ml-1 min-w-[3.5rem] text-xs font-semibold text-slate-600">
+                  {rating ? `${rating}/5` : 'Tap a star'}
+                </span>
+              </div>
+
+              <textarea
+                className="input mt-3 min-h-[88px] resize-y"
+                rows={3}
+                maxLength={500}
+                placeholder="Optional feedback — anything you would like to share about the exam experience…"
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+              />
+
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="text-[11px] tabular-nums text-slate-400">{feedback.length}/500</p>
+                <button type="button" className="btn-primary" onClick={() => setFeedbackSubmitted(true)}>
+                  Submit feedback
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="mx-6 mt-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 sm:mx-8">
+              ✓ Thanks for your feedback! Your session will sign out automatically in {autoLogoutSecs}s.
             </div>
           )}
 

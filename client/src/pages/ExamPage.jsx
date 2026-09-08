@@ -56,6 +56,17 @@ export default function ExamPage() {
   const [pre, setPre] = useState(null); // details captured before the exam starts
   const [prep, setPrep] = useState(90); // seconds before questions unlock (lets question images preload)
 
+  // ---- device permission / verification gates (client-side only) --------------
+  const [camReady, setCamReady] = useState(false); // camera permission granted
+  const [micReady, setMicReady] = useState(false); // microphone permission granted
+  const [camError, setCamError] = useState('');
+  const [micError, setMicError] = useState('');
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const [micBusy, setMicBusy] = useState(false);
+  const [micLevel, setMicLevel] = useState(0); // live 0..1 analyser value
+  const [photo, setPhoto] = useState(null); // captured verification photo (data URL, never sent)
+  const [acceptedRules, setAcceptedRules] = useState(false); // terms + no-malpractice checkbox
+
   const answersRef = useRef({});
   const dirtyRef = useRef(new Set());
   const timersRef = useRef({});
@@ -66,6 +77,16 @@ export default function ExamPage() {
   const lastYRef = useRef(-1); // last known pointer y, used by the cursor guard
   const guardActiveRef = useRef(false); // guard already engaged (avoids flicker)
   const redLineRef = useRef(null); // red boundary line element (guard boundary)
+
+  // Device-permission refs: the streams must survive re-renders (e.g. the
+  // instructions preview unmounts when the exam workspace mounts the same feed).
+  const cameraStreamRef = useRef(null);
+  const micStreamRef = useRef(null);
+  const cameraVideoRef = useRef(null); // whichever <video> is currently mounted
+  const photoCanvasRef = useRef(null); // hidden capture canvas (instructions page)
+  const micCtxRef = useRef(null); // audio context backing the mic level meter
+  const micAnalyserRef = useRef(null);
+  const micLevelTimerRef = useRef(null);
 
   const total = questions.length;
   const q = questions[current];
@@ -493,6 +514,145 @@ export default function ExamPage() {
     return () => Object.values(timers).forEach((t) => window.clearTimeout(t));
   }, []);
 
+  // ---- camera / microphone / verification photo (client-side only) ------------
+  // Streams live only inside this tab; stray tracks are stopped on unmount and
+  // nothing (video, photo or mic level) is ever sent to the server or stored.
+  const cameraVideoRefCb = useCallback(
+    (el) => {
+      cameraVideoRef.current = el;
+      if (el && cameraStreamRef.current) {
+        try {
+          el.srcObject = cameraStreamRef.current;
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+    []
+  );
+
+  const enableCamera = useCallback(async () => {
+    if (cameraBusy || cameraStreamRef.current) return;
+    setCameraBusy(true);
+    setCamError('');
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('This browser cannot access the camera here. Open the portal on localhost (or HTTPS) and allow camera permission.');
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      cameraStreamRef.current = stream;
+      if (cameraVideoRef.current) {
+        try {
+          cameraVideoRef.current.srcObject = stream;
+        } catch {
+          /* ignore */
+        }
+      }
+      setCamReady(true);
+    } catch (err) {
+      setCamError(err?.message || 'Camera permission was denied or no camera is available. Allow camera access and try again.');
+    } finally {
+      setCameraBusy(false);
+    }
+  }, [cameraBusy]);
+
+  // Live microphone level meter (best effort) - analyser nodes are supported by
+  // current Chrome/Safari; the microphone itself is still enabled without it.
+  const setupMicMeter = useCallback(() => {
+    const stream = micStreamRef.current;
+    if (!stream) return;
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const micCtx = new AudioCtx();
+      if (typeof micCtx.createAudioAnalyser !== 'function') return;
+      const analyser = micCtx.createAudioAnalyser();
+      const source = micCtx.createAudioStreamSource(stream);
+      source.connect(analyser);
+      analyser.connect(micCtx.destination);
+      micCtxRef.current = micCtx;
+      micAnalyserRef.current = analyser;
+      micLevelTimerRef.current = window.setInterval(() => setMicLevel(analyser.value || 0), 180);
+    } catch {
+      /* meter unavailable - microphone is still connected */
+    }
+  }, []);
+
+  const enableMic = useCallback(async () => {
+    if (micBusy || micStreamRef.current) return;
+    setMicBusy(true);
+    setMicError('');
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('This browser cannot access the microphone here. Open the portal on localhost (or HTTPS) and allow microphone permission.');
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+      micStreamRef.current = stream;
+      setMicReady(true);
+      setupMicMeter();
+    } catch (err) {
+      setMicError(err?.message || 'Microphone permission was denied or no microphone is available. Allow microphone access and try again.');
+    } finally {
+      setMicBusy(false);
+    }
+  }, [micBusy, setupMicMeter]);
+
+  const capturePhoto = useCallback(() => {
+    const video = cameraVideoRef.current;
+    const canvas = photoCanvasRef.current;
+    if (!video || !canvas || !cameraStreamRef.current) return;
+    const w = Math.max(2, video.videoWidth || 640);
+    const h = Math.max(2, video.videoHeight || 480);
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d').drawImage(video, 0, 0, w, h);
+    try {
+      setPhoto(canvas.toDataURL('image/jpeg', 0.85));
+    } catch {
+      setPhoto(canvas.toDataURL());
+    }
+  }, []);
+
+  // Release camera/mic + meter on unmount so nothing keeps the devices busy.
+  useEffect(() => {
+    return () => {
+      if (micLevelTimerRef.current) window.clearInterval(micLevelTimerRef.current);
+      micLevelTimerRef.current = null;
+      if (micCtxRef.current) {
+        try {
+          micCtxRef.current.suspend();
+        } catch {
+          /* ignore */
+        }
+        micCtxRef.current = null;
+      }
+      [cameraStreamRef, micStreamRef].forEach((streamRef) => {
+        const stream = streamRef.current;
+        if (!stream) return;
+        const tracks =
+          typeof stream.getTracks === 'function' ? stream.getTracks() : [...stream.getVideoTracks(), ...stream.getAudioTracks()];
+        tracks.forEach((t) => {
+          try {
+            t.stop();
+          } catch {
+            /* ignore */
+          }
+        });
+      });
+    };
+  }, []);
+
+  // ---- instructions gating ----------------------------------------------------
+  const startingHints = [
+    ['camera on', !camReady],
+    ['microphone on', !micReady],
+    ['verification photo captured', !photo],
+    ['terms & conditions accepted', !acceptedRules],
+  ]
+    .filter(([, done]) => !done)
+    .map(([label]) => label);
+  const canStart = camReady && micReady && !!photo && acceptedRules;
+
   // ---- full-screen + malpractice listeners ------------------------------------
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -690,11 +850,115 @@ export default function ExamPage() {
               <li>Your attempt is stored against your hall ticket. Once submitted, this exam is over for you.</li>
             </ol>
 
+            <h2 className="mt-6 text-base font-bold text-slate-900">System check — camera &amp; microphone</h2>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              Your camera and microphone must stay <b>on</b> for the entire exam, and a verification photo has to be captured
+              before you begin. All of this happens in your browser only — <b>nothing is recorded or stored</b>.
+            </p>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {/* camera */}
+              <div className={cn('rounded-xl border bg-white p-4', camReady ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200')}>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wide text-slate-500">Camera</p>
+                  {camReady ? <span className="chip bg-emerald-100 text-emerald-700">ON ✓</span> : <span className="chip bg-slate-200 text-slate-600">OFF</span>}
+                </div>
+                {camReady ? (
+                  <video
+                    ref={cameraVideoRefCb}
+                    muted
+                    autoPlay
+                    playsInline
+                    className="mt-2 aspect-video w-full rounded-lg border border-slate-200 bg-slate-900 object-cover"
+                    style={{ transform: 'scaleX(-1)' }}
+                  />
+                ) : (
+                  <div className="mt-2 flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-xs text-slate-400">
+                    Camera preview appears here
+                  </div>
+                )}
+                <button type="button" className="btn-secondary mt-2.5 w-full" onClick={enableCamera} disabled={cameraBusy || camReady}>
+                  {cameraBusy ? 'Requesting access…' : camReady ? 'Camera enabled' : 'Enable Camera'}
+                </button>
+                {camError && <p className="mt-1.5 text-[11px] leading-4 text-rose-600">{camError}</p>}
+              </div>
+
+              {/* microphone */}
+              <div className={cn('rounded-xl border bg-white p-4', micReady ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200')}>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wide text-slate-500">Microphone</p>
+                  {micReady ? <span className="chip bg-emerald-100 text-emerald-700">ON ✓</span> : <span className="chip bg-slate-200 text-slate-600">OFF</span>}
+                </div>
+                <div className="mt-2 flex h-24 w-full items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50">
+                  {micReady ? (
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: 12 }, (_, i) => (
+                        <span
+                          key={i}
+                          className={cn('h-7 w-2 rounded-sm', i < Math.round(micLevel * 12) ? 'bg-emerald-500' : 'bg-slate-300/60')}
+                        />
+                      ))}
+                      <span className="ml-1.5 text-[10px] font-semibold text-slate-500">LIVE</span>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-slate-400">Microphone level appears here</span>
+                  )}
+                </div>
+                <button type="button" className="btn-secondary mt-2.5 w-full" onClick={enableMic} disabled={micBusy || micReady}>
+                  {micBusy ? 'Requesting access…' : micReady ? 'Microphone enabled' : 'Enable Microphone'}
+                </button>
+                {micError && <p className="mt-1.5 text-[11px] leading-4 text-rose-600">{micError}</p>}
+              </div>
+            </div>
+            {/* verification photo (captured in-browser, kept in memory only) */}
+            <canvas ref={photoCanvasRef} className="hidden" aria-hidden="true" />
+            <div className={cn('mt-3 rounded-xl border bg-white p-4', photo ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200')}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[0.6875rem] font-bold uppercase tracking-wide text-slate-500">Verification photo</p>
+                {photo ? <span className="chip bg-emerald-100 text-emerald-700">Captured ✓</span> : <span className="chip bg-slate-200 text-slate-600">Pending</span>}
+              </div>
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                <div className="flex aspect-video items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 text-center text-xs text-slate-400">
+                  {photo ? 'Photo captured — only shown to you in this tab' : 'Capture a photo to verify your identity'}
+                </div>
+                {photo && <img src={photo} alt="Your verification photo" className="aspect-video w-full rounded-lg border border-slate-200 object-cover" />}
+              </div>
+              <button type="button" className="btn-secondary mt-2.5" onClick={capturePhoto} disabled={!camReady || cameraBusy}>
+                {photo ? 'Retake photo' : 'Capture Photo'}
+              </button>
+              {!camReady && <p className="mt-1.5 text-[11px] leading-4 text-amber-700">Turn the camera on first — the photo button unlocks then.</p>}
+              {photo && <p className="mt-1 text-[11px] text-slate-400">Please check you Image properly-Only image shown here is final.</p>}
+            </div>
+
+            <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3">
+              <input
+                type="checkbox"
+                checked={acceptedRules}
+                onChange={(e) => setAcceptedRules(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 accent-indigo-600"
+              />
+              <span className="text-xs leading-5 text-slate-700">
+                I have read all the instructions carefully, accept the <b>terms &amp; conditions</b>, and will
+                <b>not resort to any malpractice</b> while taking this exam.
+              </span>
+            </label>
             {fsError && (
               <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{fsError}</div>
             )}
 
-            <button type="button" className="btn-primary mt-6 w-full" onClick={startExam} disabled={starting}>
+            {startingHints.length > 0 && (
+              <p className="mt-3 text-xs leading-5 text-slate-500">
+                Start unlocks once you: <span className="font-medium text-slate-600">{startingHints.join(' · ')}</span>.
+              </p>
+            )}
+
+            <button
+              type="button"
+              className="btn-primary mt-4 w-full"
+              onClick={startExam}
+              disabled={starting || !canStart}
+              title={canStart ? 'Start the exam in full screen' : 'Complete the system check above to unlock starting.'}
+            >
               {starting ? 'Entering full screen…' : 'Start Exam — Enter Full Screen'}
             </button>
             <p className="mt-3 text-center text-xs text-slate-400">By starting, you accept the exam rules above.</p>
@@ -708,6 +972,13 @@ export default function ExamPage() {
   const timerLow = leftSeconds !== null && leftSeconds <= 300;
   const prepActive = prep > 0; // pre-question countdown still running -> questions locked
   const answeredCount = counts.answered + counts.answeredMarked;
+
+  // Diagonal identity watermark repeated over the question/answer area. The text
+  // is derived from the logged-in session only and never leaves the browser.
+  const watermarkParts = [candidate?.hallTicketNo, candidate?.email, exam?.finalExamId]
+    .map((v) => String(v || '').trim())
+    .filter(Boolean);
+  const watermarkLine = watermarkParts.join('  •  ');
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-100">
@@ -784,27 +1055,95 @@ export default function ExamPage() {
 
       {/* ===== workspace ===== */}
       <div className="relative mx-auto flex w-full max-w-[1280px] flex-1 flex-col gap-4 px-4 py-4 lg:flex-row">
-        {/* pre-question image-loading countdown overlay (covers workspace, keeps the header clock visible) */}
+        {/* 90-second pre-exam countdown: fixed overlay - covers the ENTIRE screen, all four corners */}
         {prepActive && (
-          <div className="absolute inset-0 z-40 flex items-center justify-center rounded-2xl bg-white/90 px-4 backdrop-blur-sm">
-            <div className="card w-full max-w-md border-indigo-100 p-8 text-center shadow-2xl">
-              <div className="text-5xl">🖼️</div>
-              <h2 className="mt-3 text-lg font-bold text-slate-900">Get ready — Questions loading</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                We are pre-loading every question image so nothing is delayed once you start. You can begin answering in…
-              </p>
-              <div className="mt-5 font-mono text-6xl font-black tabular-nums text-indigo-600">{prep}</div>
-              <div className="mt-1 text-xs font-medium uppercase tracking-wider text-slate-400">seconds</div>
-              <div className="mt-5 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-white/95 px-4 backdrop-blur-sm">
+            <div className="shadow-2xl ring-1 ring-indigo-100 w-full max-w-2xl rounded-2xl border border-indigo-100 bg-white p-7">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-4xl leading-none">📖</span>
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-900">Read the instructions carefully</h2>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      Questions unlock automatically when the timer ends — you can begin answering in
+                    </p>
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="font-mono text-4xl font-black tabular-nums text-indigo-600">{prep}</div>
+                  <div className="text-[10px] font-medium uppercase tracking-wider text-slate-400">seconds</div>
+                </div>
+              </div>
+
+              <div className="mt-4 max-h-[62vh] space-y-3 overflow-y-auto">
+                <ol className="list-decimal space-y-2.5 pl-5 text-sm leading-6 text-slate-700">
+                  <li>
+                    All questions are <b>multiple-choice</b>. Select one option and press <b>Save &amp; Next</b> —
+                    answers also auto-save as you click.
+                  </li>
+                  <li>
+                    <b>Clear Response</b> removes your saved answer · <b>Mark for Review</b> flags a question so it
+                    stands out in the palette. You can revisit any question anytime.
+                  </li>
+                  <li>
+                    Use the <b>question palette</b> on the right to jump between questions. Answered questions turn green,
+                    unanswered red, marked violet, and unvisited stay blank.
+                  </li>
+                  <li>
+                    Each correct answer scores <b>+1</b>; wrong or blank answers score <b>0</b>. There is no negative marking.
+                  </li>
+                  <li>
+                    The <b>countdown</b> at the top shows your remaining time. The exam <b>auto-submits</b> the moment it
+                    reaches zero.
+                  </li>
+                  <li>
+                    <b>Anti-malpractice:</b> leaving full screen, switching tabs, copy / cut / paste, right-click, DevTools
+                    or print shortcuts are recorded in real time. You get <b>3 warnings</b> — a <b>4th offence
+                    auto-submits</b> your exam and ends your session.
+                  </li>
+                  <li>
+                    Keep your <b>camera and microphone on</b> for the whole exam — the live camera check stays visible in the
+                    palette.
+                  </li>
+                  <li>
+                    Do not refresh or close the tab once the timer has started. Your attempt is stored against your hall
+                    ticket and the exam ends once you submit.
+                  </li>
+                </ol>
+              </div>
+
+              <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                 <div
                   className="h-full rounded-full bg-indigo-500 transition-all duration-1000"
                   style={{ width: `${((90 - prep) / 90) * 100}%` }}
                 />
               </div>
+              <p className="mt-1 text-center text-[11px] font-medium text-indigo-600">Questions unlock in {prep} seconds…</p>
             </div>
           </div>
         )}
 
+        {/* diagonal identity watermark — repeated across many rows over the question/answer area */}
+        {watermarkLine && (
+          <div className="pointer-events-none absolute inset-0 z-[35] overflow-hidden" aria-hidden="true">
+            {Array.from({ length: 18 }, (_, i) => (
+              <p
+                key={i}
+                className="select-none whitespace-nowrap text-sm font-medium text-slate-400/30"
+                style={{
+                  position: 'absolute',
+                  top: `${i * 88 - 80}px`,
+                  left: i % 2 === 0 ? '-8%' : '-34%',
+                  transform: 'rotate(-24deg)',
+                  transformOrigin: 'left center',
+                  letterSpacing: '0.18em',
+                }}
+              >
+                {Array.from({ length: 5 }, () => watermarkLine).join('        ')}
+              </p>
+            ))}
+          </div>
+        )}
         <main className="min-w-0 flex-1">
           {submitError && (
             <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -997,6 +1336,22 @@ export default function ExamPage() {
               <p><span className="mr-1.5 inline-block h-2 w-2 rounded-sm bg-violet-300" />Marked for review</p>
               <p><span className="mr-1.5 inline-block h-2 w-2 rounded-sm border border-slate-300 bg-white" />Not visited</p>
             </div>
+
+            {/* live camera feed below the palette - same stream, not recorded or stored */}
+            {camReady && (
+              <div className="mt-4 space-y-1.5 border-t border-slate-100 pt-3">
+                <p className="text-[0.6875rem] font-bold uppercase tracking-wide text-slate-500">Live check</p>
+                <video
+                  ref={cameraVideoRefCb}
+                  muted
+                  autoPlay
+                  playsInline
+                  className="aspect-video w-full rounded-lg border border-slate-300 bg-slate-900 object-cover"
+                  style={{ transform: 'scaleX(-1)' }}
+                />
+                <p className="text-[0.625rem] leading-4 text-slate-400">Camera feed stays on during the exam — never recorded or stored.</p>
+              </div>
+            )}
 
             <button
               type="button"
