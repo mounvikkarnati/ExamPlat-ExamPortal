@@ -59,7 +59,7 @@ export default function LoginPage() {
               <div><p className="font-bold tracking-tight">ExamPlat</p><p className="text-xs text-slate-400">Secure assessment platform</p></div>
             </div>
             <div className="my-auto py-12">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-300">Candidate workspace</p>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-300">Candidate Exam</p>
               <h1 className="mt-4 max-w-sm text-3xl font-bold leading-tight tracking-tight sm:text-4xl">A focused, secure way to take your final exam.</h1>
               <p className="mt-5 max-w-sm text-sm leading-6 text-slate-300">Your identity, exam window and responses are verified and protected throughout the assessment.</p>
               <div className="mt-8 space-y-3 text-sm text-slate-200"><p>✓ Server-synchronised exam timing</p><p>✓ Automatic answer saving</p><p>✓ Secure full-screen assessment</p></div>
