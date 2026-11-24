@@ -12,20 +12,16 @@ const app = express();
 const PORT = process.env.PORT || 5030;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5175';
 
-// ---- CORS: allow the Vite dev server on 5175 (and any origin listed in CLIENT_ORIGIN) ----
-const allowedOrigins = String(CLIENT_ORIGIN)
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+const allowedOrigins = [
+  "https://examplat-exam.nritupskills.com"
+];
 
 app.use(
   cors({
-    origin(origin, cb) {
-      if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-      return cb(new Error(`Origin "${origin}" not allowed by CORS`));
-    },
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
   })
 );
 
